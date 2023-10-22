@@ -3,13 +3,19 @@
 
 int main() {
     WebServer server(
-        1316, 3, 60000, false,                  // 端口 ET模式 timeoutMs 优雅退出
+        1316,                           // 端口
+        3,                              // ET模式
+        60000,                          // timeoutMs
+        false,                          // 优雅退出
         3306,
-        Config::SQL_USERNAME.c_str(), 
-        Config::SQL_PSW.c_str(), 
-        Config::SQL_DBNAME.c_str(), 
-        12,                                     // 连接池数量
-        6,                                      // 线程池数量
-        true, 3, 1024);                         // 日志开关 日志等级 日志异步队列容量
+        Config::SQL_USERNAME.c_str(),   // mysql用户名
+        Config::SQL_PSW.c_str(),        // mysql密码
+        Config::SQL_DBNAME.c_str(),     // 数据库名
+        8,                              // 连接池数量
+        16,                             // 线程池数量
+        false,                          // 日志开关
+        1,                              // 日志等级
+        1024);                          // 日志异步队列容量
+    
     server.Start();
 }

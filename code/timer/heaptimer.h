@@ -46,7 +46,7 @@ public:
 	void DoWork(int id);
 	void Clear();
 	void Pop();
-	// 超时处理+ 获取等待时间
+	// 超时处理 + 获取等待时间
 	int GetNextTick();
 };
 

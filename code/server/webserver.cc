@@ -106,11 +106,13 @@ void WebServer::Start() {
  				assert(users_.count(fd) > 0);
  				CloseConn_(&users_[fd]);
  			}
- 			// Fd 可写
+ 			// Fd 可读
  			else if (events & EPOLLIN) {
  				assert(users_.count(fd) > 0);
  				DealRead_(&users_[fd]);
- 			} else if (events & EPOLLOUT) {
+ 			} 
+ 			// Fd 可写
+ 			else if (events & EPOLLOUT) {
  				assert(users_.count(fd) > 0);
  				DealWrite_(&users_[fd]);
  			} else {
@@ -231,16 +233,16 @@ void WebServer::DealListen_() {
 	struct sockaddr_in addr;
 	socklen_t len = sizeof(addr);
 	do {
-		// 返回新的 连接 socket，从连接请求队列中，一直取，直到没有
+		// 返回新的 连接 socket，从连接请求等待队列中一直取
 		int fd = accept(listenFd_, (struct sockaddr *)&addr, &len);
-		if (fd <= 0) { return; }
+		if (fd <= 0) { return; }	// 连接请求等待队列没有数据
 		else if (HttpConn::userCount >= MAX_FD) {
 			SendError_(fd, "Server busy!");
 			LOG_WARN("Clients is full!");
 			return;
 		}
 		AddClient_(fd, addr);
-	} while (listenEvent_ & EPOLLET);	// 循环一直进行知道 accept 队列没有数据
+	} while (listenEvent_ & EPOLLET);	// 循环一直进行直到 accept 队列没有数据
 }
 
 /**
@@ -278,6 +280,10 @@ void WebServer::OnRead_(HttpConn *client) {
 	int ret = -1;
 	int readErrno = 0;
 	ret = client->Read(&readErrno);
+	// 这个错误表示资源暂时不够，能 read 时，读缓冲区没有数据，或者 write 时，写缓冲区满了。遇到这种情况，
+	// 如果是阻塞 socket，read/write 就要阻塞掉
+	// 而如果是非阻塞 socket，read/write 立即返回 - 1， 同时 errno 设置为 EAGAIN
+	// 所以，对于阻塞 socket，read/write 返回 - 1 代表网络出错了。但对于非阻塞 socket，read/write 返回 - 1 不一定网络真的出错了。可能是 Resource temporarily unavailable。这时你应该再试，直到 Resource available。
 	if (ret <= 0 && readErrno != EAGAIN) {
 		CloseConn_(client);
 		return;
@@ -295,6 +301,7 @@ void WebServer::OnProcess(HttpConn *client) {
 		epoller_->ModFd(client->GetFd(), connEvent_ | EPOLLOUT);
 	} else {
 		// OnWrite_ 调用，没有可写的，注册可读
+		// 或者新连接无可读数据
 		epoller_->ModFd(client->GetFd(), connEvent_ | EPOLLIN);
 	}
 }
@@ -308,8 +315,10 @@ void WebServer::OnWrite_(HttpConn *client) {
 	int ret = -1;
 	int writeErrno = 0;
 	ret = client->Write(&writeErrno);
+	// 没有要发送数据
 	if (client->ToWriteBytes() == 0) {
 		// 长连接重置 http 类实例，注册读事件，不关闭连接
+		// client->Process() false readBuff_.ReadableBytes() <= 0
 		if (client->IsKeepAlive()) {
 			OnProcess(client);
 			return;
@@ -319,7 +328,8 @@ void WebServer::OnWrite_(HttpConn *client) {
 	else if (ret < 0) {
 		// EAGAIN 一般用于非阻塞的系统调用 
 		// 这里表示缓冲区满了再次尝试
-		// 更新 iovec 结构体的指针和长度，并注册写事件，等待下一次写事件触发
+		// 更新 iovec 结构体的指针和长度，并注写事件，等待下一次写事件触发
+		// 怎么触发，如何触发写事件
 		if (writeErrno == EAGAIN) {
 			// 特殊情况 注册可写
 			epoller_->ModFd(client->GetFd(), connEvent_ | EPOLLOUT);

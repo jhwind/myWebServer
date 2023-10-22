@@ -40,6 +40,9 @@ ssize_t HttpConn::Read(int *saveErrno) {
 	ssize_t len = -1;
 	// 如果还是 ET 触发状态，那就一直读，直到没有可读内容，break
 	// Level 为只要处于水平，那么就一直触发，而 Edge 则为上升沿和下降沿的时候触发
+	// 将缓冲区读完
+	// LT 模式下下面这段代码不是循环，但是下面这段代码在缓冲区有数据据下会被不断执行
+	// ET 模式下只会执行一次，所以需要循环
 	do {
 		len = readBuff_.ReadFd(fd_, saveErrno);
 		if (len <= 0) break;
@@ -52,7 +55,13 @@ ssize_t HttpConn::Write(int *saveErrno) {
 	do {
 		// 分散写数据
 		len = writev(fd_, iov_, iovCnt_);
+		// >0 ： 正常情况下返回写入的字节数，阻塞的 write 调用将检测写缓冲区的大小，当写缓冲大于 write 低水位时，就写入成功返回。
+		// =0 ： 当 write 写入的描述符正确，且写入字符个数 count == 0，时，write 可能返回 0，errno 为 0，也表示 write 调用成功
+		// <0 ： 表示 write 写入失败，可以通过 errno 查看原因
 		if (len <= 0) {
+			// 查看错误代码 errno 是调试程序的一个重要方法
+			// 当 Linux C API 函数发生异常时 , 一般会将 errno 变量赋值一个整数 , 不同的值表示不同的含义
+			// 可以通过查看该值推测出错的原因 #define EAGAIN 11 // Try again
 			*saveErrno = errno;
 			break;
 		}

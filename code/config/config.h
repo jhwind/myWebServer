@@ -16,12 +16,12 @@ namespace Config{
     const std::string SQL_USERNAME = "root";
     const std::string SQL_PSW = "root";
     const std::string SQL_DBNAME = "yourdb";
-    const int SQL_CONNNUM = 12;
+    const int SQL_CONNNUM = 8;
 
     // BASE
     // const std::string SOURCE_DIR = "/home/ubuntu/project/cppproject/MyWebServer/resources";
     const int SYS_PORT = 8079;
-    const int SYS_THREADNUM = 6;
+    const int SYS_THREADNUM = 16;
     const int SYS_TIMEOUT = 60000;
     const int SYS_TRIGEMODE = 3;
     const bool SYS_OPTLINER = false;

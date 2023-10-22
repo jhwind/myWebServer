@@ -33,9 +33,9 @@ private:
 	uint32_t listenEvent_;	// 监听 socket 的 Epoll events
 	uint32_t connEvent_;
 
+	std::unique_ptr<Epoller> epoller_;
 	std::unique_ptr<HeapTimer> timer_;
 	std::unique_ptr<ThreadPool> threadpool_;
-	std::unique_ptr<Epoller> epoller_;
 	std::unordered_map<int, HttpConn> users_;
 
 	static int SetFdNonblock(int fd);
