@@ -74,8 +74,9 @@ create database yourdb;
 # 创建user表
 USE yourdb;
 CREATE TABLE user(
-    username varchar(50) NOT NULL PRIMARY KEY,
-    passwd varchar(50) NULL
+    username varchar(10) NOT NULL,
+    passwd varchar(10) NOT NULL,
+	PRIMARY KEY (username)
 ) ENGINE = InnoDB;
 
 # 添加数据
