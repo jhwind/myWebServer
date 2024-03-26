@@ -1,7 +1,9 @@
 #include <unistd.h>
+#include <signal.h>
 #include "server/webserver.h"
 
 int main() {
+    signal(SIGPIPE, SIG_IGN);
     WebServer server(
         1316,                           // 端口
         3,                              // ET模式
@@ -13,9 +15,10 @@ int main() {
         Config::SQL_DBNAME.c_str(),     // 数据库名
         8,                              // 连接池数量
         16,                             // 线程池数量
-        false,                          // 日志开关
-        1,                              // 日志等级
+        true,                           // 日志开关
+        3,                              // 日志等级
         1024);                          // 日志异步队列容量
     
     server.Start();
+    return 0;
 }

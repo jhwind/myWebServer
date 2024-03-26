@@ -36,6 +36,16 @@ void HttpConn::Close() {
 	}
 }
 
+void HttpConn::Shutdown() {
+	response_.UnmapFile();
+	if (isClose_ == false) {
+		isClose_ = true;
+		userCount--;
+		shutdown(fd_, SHUT_WR);
+        LOG_INFO("Client[%d](%s:%d) shutdown, UserCount:%d", fd_, GetIP(), GetPort(), (int)userCount);
+	}
+}
+
 ssize_t HttpConn::Read(int *saveErrno) {
 	ssize_t len = -1;
 	// 如果还是 ET 触发状态，那就一直读，直到没有可读内容，break
@@ -88,11 +98,12 @@ ssize_t HttpConn::Write(int *saveErrno) {
 }
 // 已经读完，重置 request 后，对内容进行解析，生成结果 response
 bool HttpConn::Process() {
-	request_.Init();
 	if (readBuff_.ReadableBytes() <= 0) {
 		return false;	
 	}	
-	else if (request_.Parse(readBuff_)) {
+
+	request_.Init();
+	if (request_.Parse(readBuff_)) {
 		LOG_DEBUG("%s", request_.Path().c_str());
 		response_.Init(srcDir, request_.Path(), request_.IsKeepAlive(), 200);
 	} else {

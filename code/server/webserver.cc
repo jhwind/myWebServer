@@ -6,31 +6,16 @@ using namespace std;
  * @brief 初始化 sql连接池 httpconn 线程池 日志 定时器 epoller
  */
 WebServer::	WebServer(
-	int port, int trigMode, int timeoutMS, bool OPTLinger, 
+	uint16_t port, int trigMode, int timeoutMS, bool OPTLinger, 
 	int sqlPort, const char *sqlUser, const char *sqlPwd, const char *dbName, int connPoolNum, int threadNum,
 	bool openLog, int logLevel, int logQueSize) :
-	port_(port), openLinger_(OPTLinger), timeoutMS_(timeoutMS), isClose_(false),
+	port_(port), openLinger_(OPTLinger), timeoutMS_(timeoutMS), Closed_(false),
 	timer_(new HeapTimer()), threadpool_(new ThreadPool(threadNum)), epoller_(new Epoller())
 {
-	// httpconn 配置
-	srcDir_ = getcwd(nullptr, 256);	// 动态给 srcDir_ 分配内存	
-	assert(srcDir_);
-	strncat(srcDir_, "/resources/", 16);
-
-	HttpConn::userCount = 0;
-	HttpConn::srcDir = srcDir_;
-
-	// sql 初始化
-	SqlConnPool::Instance()->Init("localhost", sqlPort, sqlUser, sqlPwd, dbName, connPoolNum);
-
-	InitEventMode_(trigMode);
-	// socket 初始化
-	if (!InitSocket_()) { isClose_ = true; }
-
 	// log 初始化
 	if (openLog) {
 		Log::Instance()->Init(logLevel, "./log", ".log", logQueSize);
-        if(isClose_) { LOG_ERROR("========== Server init error!=========="); }
+        if(Closed_) { LOG_ERROR("========== Server init error!=========="); }
         else {
             LOG_INFO("========== Server init ==========");
             LOG_INFO("Port:%d, OpenLinger: %s", port_, openLinger_? "true":"false");
@@ -42,6 +27,23 @@ WebServer::	WebServer(
             LOG_INFO("SqlConnPool num: %d, ThreadPool num: %d", connPoolNum, threadNum);
         }
 	}
+	// httpconn 配置
+	srcDir_ = getcwd(nullptr, 256);	// 动态给 srcDir_ 分配内存	
+	assert(srcDir_);
+	strncat(srcDir_, "/resources", 16);
+
+	LOG_INFO("%s", srcDir_);
+
+	HttpConn::userCount = 0;
+	HttpConn::srcDir = srcDir_;
+
+	// sql 初始化
+	SqlConnPool::Instance()->Init("localhost", sqlPort, sqlUser, sqlPwd, dbName, connPoolNum);
+
+	InitEventMode_(trigMode);
+	// socket 初始化
+	if (!InitSocket_()) { Closed_ = true; }
+
 }
 /**
  * @brief 1. 关闭监听事件文件描述符
@@ -49,7 +51,7 @@ WebServer::	WebServer(
  */
 WebServer::~WebServer() {
 	close(listenFd_);
-	isClose_ = true;
+	Closed_ = true;
 	free(srcDir_);
 	SqlConnPool::Instance()->ClosePool();
 }
@@ -88,8 +90,8 @@ void WebServer::InitEventMode_(int trigMode) {
  */
 void WebServer::Start() {
 	int timeMS = -1;
-    if(!isClose_) { LOG_INFO("========== Server start =========="); }
-    while (!isClose_) {
+    if(!Closed_) { LOG_INFO("========== Server start =========="); }
+    while (!Closed_) {
     	// 第二次进入循环了
     	if (timeoutMS_ > 0) {
     		timeMS = timer_->GetNextTick();
@@ -126,10 +128,10 @@ bool WebServer::InitSocket_() {
 	int ret;
 	struct sockaddr_in addr;	// 结构体处理网络通信地址 存放 ip 和 port
 
-	if (port_ > 65535 || port_ < 1024) {
-		LOG_ERROR("Port:%d error!", port_);
-		return false;
-	}
+	// if (port_ > 65535 || port_ < 1024) {
+	// 	LOG_ERROR("Port:%d error!", port_);
+	// 	return false;
+	// }
 	addr.sin_family = AF_INET;
 	// INADDR_ANY 转换过来就是0.0.0.0，泛指本机的意思，也就是表示本机的所有IP
 	// 因为有些机子不止一块网卡，多网卡的情况下，这个就表示所有网卡ip地址的意思
@@ -148,16 +150,16 @@ bool WebServer::InitSocket_() {
         LOG_ERROR("Create socket error!", port_);
         return false;
     }
-    ret = setsockopt(listenFd_, SOL_SOCKET, SO_LINGER, &OPTLinger, sizeof(OPTLinger));
-    if (ret < 0) {
-        LOG_ERROR("Init linger error!", port_);
-        close(listenFd_);
-        return false;
-    }
+    // ret = setsockopt(listenFd_, SOL_SOCKET, SO_LINGER, &OPTLinger, sizeof(OPTLinger));
+    // if (ret < 0) {
+    //     LOG_ERROR("Init linger error!", port_);
+    //     close(listenFd_);
+    //     return false;
+    // }
 
     int optval = 1;
     // 端口复用 只有最后一个套接字会正常接收数据。
-    ret = setsockopt(listenFd_, SOL_SOCKET, SO_REUSEADDR, (const void*)&optval, sizeof(int));
+    ret = setsockopt(listenFd_, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, (const void*)&optval, sizeof(int));
     if (ret == -1) {
         LOG_ERROR("set socket setsockopt error !");
         close(listenFd_);
@@ -199,6 +201,9 @@ void WebServer::SendError_(int fd, const char *info) {
 	if (ret < 0) {
 		LOG_WARN("send error to client[%d] error!", fd);
 	}
+	if (ret != strlen(info)) {
+		LOG_WARN("send error to client[%d] error! && ret != strlen(info)", fd);
+	}
 	close(fd);
 }
 
@@ -213,6 +218,17 @@ void WebServer::CloseConn_(HttpConn *client) {
 }
 
 /**
+ * @brief 关闭 http | 连接 socket
+ */
+void WebServer::ShutdownConn_(HttpConn *client) {
+	assert(client);
+    LOG_INFO("Client[%d] quit!", client->GetFd());
+	epoller_->DelFd(client->GetFd());
+	// client->Close();	
+	client->Shutdown();
+}
+
+/**
  * @brief  添加新的 http | 连接 socket
  */
 void WebServer::AddClient_(int fd, sockaddr_in addr) {
@@ -221,7 +237,7 @@ void WebServer::AddClient_(int fd, sockaddr_in addr) {
 	if (timeoutMS_ > 0) {
 		timer_->Add(fd, timeoutMS_, std::bind(&WebServer::CloseConn_, this, &users_[fd]));
 	}
-	epoller_->AddFd(fd, EPOLLIN | connEvent_);
+	epoller_->AddFd(fd, EPOLLIN | EPOLLERR | connEvent_);
 	SetFdNonblock(fd);
     LOG_INFO("Client[%d] in!", users_[fd].GetFd());
 }
@@ -235,8 +251,10 @@ void WebServer::DealListen_() {
 	do {
 		// 返回新的 连接 socket，从连接请求等待队列中一直取
 		int fd = accept(listenFd_, (struct sockaddr *)&addr, &len);
-		if (fd <= 0) { return; }	// 连接请求等待队列没有数据
-		else if (HttpConn::userCount >= MAX_FD) {
+		if (fd <= 0) { 
+			return; 
+		}	// 连接请求等待队列没有数据
+		if (HttpConn::userCount >= MAX_FD) {
 			SendError_(fd, "Server busy!");
 			LOG_WARN("Clients is full!");
 			return;
@@ -337,7 +355,8 @@ void WebServer::OnWrite_(HttpConn *client) {
 		}
 	}
 	// 不是因为缓冲区满了而失败，取消 mmap 映射，关闭连接
-	CloseConn_(client);
+	ShutdownConn_(client);
+	// CloseConn_(client);
 }
 
 /**

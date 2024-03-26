@@ -42,6 +42,7 @@ public:
 	ssize_t Write(int *saveErrno);
 
 	void Close();
+	void Shutdown();
 	int GetFd() const { return fd_; }
 	int GetPort() const { return addr_.sin_port; }
 	const char* GetIP() const { return inet_ntoa(addr_.sin_addr); }

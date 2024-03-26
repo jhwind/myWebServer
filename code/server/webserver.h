@@ -23,10 +23,10 @@ class WebServer {
 private:
 	static const int MAX_FD = 65536;
 
-	int port_;				
+	uint16_t port_;				
 	bool openLinger_;
 	int timeoutMS_;
-	bool isClose_;
+	bool Closed_;
 	int listenFd_;
 	char *srcDir_;
 
@@ -51,6 +51,7 @@ private:
 	void SendError_(int fd, const char *info);
 	void ExtentTime_(HttpConn *client);
 	void CloseConn_(HttpConn *client);
+	void ShutdownConn_(HttpConn *client);
 
 	void OnRead_(HttpConn *client);
 	void OnWrite_(HttpConn *client);
@@ -58,7 +59,7 @@ private:
 
 public:
 	WebServer(
-		int port, int trigMode, int timeoutMS, bool OPTLinger, 
+		uint16_t port, int trigMode, int timeoutMS, bool OPTLinger, 
 		int sqlPort, const char *sqlUser, const char *sqlPwd, const char *dbName, int connPoolNum, 
 		int threadNum,
 		bool openLog, int logLevel, int logQueSize);

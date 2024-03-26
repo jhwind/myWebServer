@@ -201,7 +201,10 @@ bool HttpRequest::UserVerify(const string &name, const string &pwd, bool isLogin
     // 从连接池中取 sql 连接
     MYSQL *sql;
     SqlConnRAII(&sql, SqlConnPool::Instance());
-    assert(sql);
+    if (!sql) {
+        return false;
+    }
+    // assert(sql);
 
     bool flag = false;
     unsigned int j = 0;
@@ -213,7 +216,7 @@ bool HttpRequest::UserVerify(const string &name, const string &pwd, bool isLogin
         flag = true;
     }
 
-    snprintf(order, 256, "SELECT username, password FROM user WHERE username='%s' LIMIT 1", name.c_str());
+    snprintf(order, 256, "SELECT username, passwd FROM user WHERE username='%s' LIMIT 1", name.c_str());
     LOG_DEBUG("%s", order);
 
     // 如果查询成功，返回 0
@@ -245,7 +248,7 @@ bool HttpRequest::UserVerify(const string &name, const string &pwd, bool isLogin
     if (!isLogin && flag == true) {
         LOG_DEBUG("regirster!");
         bzero(order, 256);
-        snprintf(order, 256, "INSERT INTO user(username, password) VALUES('%s','%s')", name.c_str(), pwd.c_str());
+        snprintf(order, 256, "INSERT INTO user(username, passwd) VALUES('%s','%s')", name.c_str(), pwd.c_str());
         LOG_DEBUG( "%s", order);
         if (mysql_query(sql, order)) {
             LOG_DEBUG( "Insert error!");
@@ -253,7 +256,7 @@ bool HttpRequest::UserVerify(const string &name, const string &pwd, bool isLogin
         }
         flag = true;
     }
-    SqlConnPool::Instance()->FreeConn(sql);
+    // SqlConnPool::Instance()->FreeConn(sql);
     LOG_DEBUG( "UserVerify success!");
     return flag; 
 }
