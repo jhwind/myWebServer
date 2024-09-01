@@ -2,6 +2,7 @@
 
 void HeapTimer::Siftup_(size_t i) {
 	assert(i >= 0 && i < heap_.size());
+	if (i == 0) return;
 	size_t j = (i-1) / 2;
 	while (j >= 0) {
 		if (heap_[j] < heap_[i]) { break; }

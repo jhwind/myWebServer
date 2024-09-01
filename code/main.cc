@@ -5,9 +5,9 @@
 int main() {
     signal(SIGPIPE, SIG_IGN);
     WebServer server(
-        1316,                           // 端口
+        9006,                           // 端口
         3,                              // ET模式
-        60000,                          // timeoutMs
+        15000,                          // timeoutMs
         false,                          // 优雅退出
         3306,
         Config::SQL_USERNAME.c_str(),   // mysql用户名
@@ -15,7 +15,7 @@ int main() {
         Config::SQL_DBNAME.c_str(),     // 数据库名
         8,                              // 连接池数量
         16,                             // 线程池数量
-        true,                           // 日志开关
+        false,                          // 日志开关
         3,                              // 日志等级
         1024);                          // 日志异步队列容量
     
