@@ -88,33 +88,82 @@ void HttpRequest::ParsePath_() {
     }
 }
 
-bool HttpRequest::ParseRequestLine_(const string &line) {
-    regex patten("^([^ ]*) ([^ ]*) HTTP/([^ ]*)$");
-    // 正则表达式匹配，所有匹配结果存储在 smatch 结构体中
-    smatch subMatch;
-    if(regex_match(line, subMatch, patten)) {   
-        method_ = subMatch[1];
-        path_ = subMatch[2];
-        version_ = subMatch[3];
-        // 行解析完毕，状态转移至 HEADERS
-        state_ = HEADERS;
-        return true;
+// bool HttpRequest::ParseRequestLine_(const string &line) {
+//     regex patten("^([^ ]*) ([^ ]*) HTTP/([^ ]*)$");
+//     // 正则表达式匹配，所有匹配结果存储在 smatch 结构体中
+//     smatch subMatch;
+//     if(regex_match(line, subMatch, patten)) {   
+//         method_ = subMatch[1];
+//         path_ = subMatch[2];
+//         version_ = subMatch[3];
+//         // 行解析完毕，状态转移至 HEADERS
+//         state_ = HEADERS;
+//         return true;
+//     }
+//     LOG_ERROR("RequestLine Error");
+//     return false; 
+// }
+
+bool HttpRequest::ParseRequestLine_(const std::string &line) {
+    // 找到第一个空格的位置
+    size_t method_end = line.find(' ');
+    if (method_end == std::string::npos) {
+        LOG_ERROR("RequestLine Error: No space found for method");
+        return false;
     }
-    LOG_ERROR("RequestLine Error");
-    return false; 
+
+    // 找到第二个空格的位置，从第一个空格后开始查找
+    size_t path_end = line.find(' ', method_end + 1);
+    if (path_end == std::string::npos) {
+        LOG_ERROR("RequestLine Error: No space found for path");
+        return false;
+    }
+
+    // 解析 Method, Path, 和 HTTP Version
+    method_ = line.substr(0, method_end);
+    path_ = line.substr(method_end + 1, path_end - method_end - 1);
+    version_ = line.substr(path_end + 1);
+
+    // 检查版本号是否以 "HTTP/" 开头
+    if (version_.substr(0, 5) != "HTTP/") {
+        LOG_ERROR("RequestLine Error: Invalid HTTP version");
+        return false;
+    }
+
+    // 如果解析成功，状态转移至 HEADERS
+    state_ = HEADERS;
+    return true;
 }
 
-void HttpRequest::ParseHeader_(const string &line) {
-    regex patten("^([^:]*): ?(.*)$");
-    // regex patten("^([^:]*): ?(.*)$");
-    smatch subMatch;
-    if(regex_match(line, subMatch, patten)) {
-        header_[subMatch[1]] = subMatch[2];
-    }
-    else {
-        // 如果匹配失败则说明已经读完请求头部，将当前状态设置为 body
+
+// void HttpRequest::ParseHeader_(const string &line) {
+//     regex patten("^([^:]*): ?(.*)$");
+//     // regex patten("^([^:]*): ?(.*)$");
+//     smatch subMatch;
+//     if(regex_match(line, subMatch, patten)) {
+//         header_[subMatch[1]] = subMatch[2];
+//     }
+//     else {
+//         // 如果匹配失败则说明已经读完请求头部，将当前状态设置为 body
+//         state_ = BODY;
+//     }   
+// }
+
+void HttpRequest::ParseHeader_(const std::string &line) {
+    size_t pos = line.find(':');
+    if (pos != std::string::npos) {
+        std::string key = line.substr(0, pos);
+        std::string value = line.substr(pos + 1);
+
+        // 去掉键和值的前后空格
+        key.erase(key.find_last_not_of(" \t") + 1);
+        value.erase(0, value.find_first_not_of(" \t"));
+        header_[key] = value;
+        // 这里添加逻辑处理 key 和 value
+        // std::cout << "Key: " << key << ", Value: " << value << std::endl;
+    } else {
         state_ = BODY;
-    }   
+    }
 }
 
 // 解析 body 等同于解析 post，解析完成状态转移为 Finish

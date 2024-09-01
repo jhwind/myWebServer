@@ -36,7 +36,7 @@ void Log::SetLevel(int level) {
 	level_ = level;
 }
 
-void Log::Init(int level = 1, 
+void Log::Init(int level = 3, 
 			   const char *path, 
 			   const char *suffix,
 			   int maxQueueSize) {
