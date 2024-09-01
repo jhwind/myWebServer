@@ -87,12 +87,13 @@ void HeapTimer::Adjust(int id, int timeout) {
 
 void HeapTimer::Tick_() {
 	if (heap_.empty()) { return; }
-
+	int i = 0;
 	while (!heap_.empty()) {
 		TimerNode node = heap_.front();
 		if (std::chrono::duration_cast<MS>(node.expires - Clock::now()).count() > 0) {
 			break;
 		}
+		LOG_INFO("pop: ", i++);
 		node.cb();
 		Pop();
 	}
@@ -115,6 +116,7 @@ int HeapTimer::GetNextTick() {
 		ret = std::chrono::duration_cast<MS>(heap_.front().expires - Clock::now()).count();
 		ret = ret < 0 ? 0 : ret;
 	}
+	LOG_INFO("GetNextTick: ", ret);
 	return ret;
 }
 
