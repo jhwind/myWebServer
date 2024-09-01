@@ -10,151 +10,286 @@
 #include <deque>
 #include <condition_variable>
 #include <sys/time.h>
+#include <atomic>
+#include <stdexcept>
 
 template<class T>
 class BlockDeque {
 private:
-	std::deque<T> deq_;
-	size_t capacity_;
-	bool isClose_;
+    std::vector<T> buffer_;         // 缓冲区
+    std::atomic<size_t> head_;      // 读指针
+    std::atomic<size_t> tail_;      // 写指针
+    size_t capacity_;               // 队列容量
+    size_t mask_;                   // 用于环形索引
+    std::atomic<bool> isClosed_;    // 标记队列是否已关闭
 
-	std::mutex mtx_;
-	std::condition_variable condConsumer_;
-	std::condition_variable condProducer_;	
+    size_t increment(size_t idx) const {
+        return (idx + 1) & mask_;
+    }
 
 public:
-	explicit BlockDeque(size_t MaxCapacity = 1000); 
-	~BlockDeque();
+    explicit BlockDeque(size_t MaxCapacity = 1000);
+    ~BlockDeque() = default;
 
-	void clear();
-	bool empty();
-	bool full();
-	/**
-     * @brief 关闭队列
-     * @return {*}
-     */    
-	void Close();
-	size_t size();
-	size_t capacity();
+    void clear();
+    bool empty() const;
+    bool full() const;
+    size_t size() const;
+    size_t capacity() const;
 
-	T front();
-	T back();
-	void push_back(const T &item);
-	void push_front(const T &item);
-	bool pop(T &item);
-	// bool pop(T &item, int timeout);
-	/**
-     * @brief 刷新缓冲区
-     * 		  通知消费者，队列中有数据可消费
-     * 		  在此项目中，异步写日志时会调用阻塞队列中的pop函数
-     * 		  如果队列为空pop函数会阻塞等待队列中有数据唤醒，此函数作用为唤醒阻塞线程(写线程)
-     * @return {*}
-     */  
-	void flush();
+    T front() const;
+    T back() const;
+    void push_back(const T &item);
+    void push_front(const T &item);
+    bool pop(T &item);
+    void Close();  // 关闭队列
 };
 
 template<class T>
-// BlockDeque<T>::BlockDeque(size_t MaxCapacity = 100) : capacity_(MaxCapacity) {
-BlockDeque<T>::BlockDeque(size_t MaxCapacity) : capacity_(MaxCapacity) {
-	assert(MaxCapacity > 0);
-	isClose_ = false;
-}
-
-template<class T>
-BlockDeque<T>::~BlockDeque() {
-	Close();
-}
-
-template<class T>
-void BlockDeque<T>::Close() {
-	{
-		std::lock_guard<std::mutex> locker(mtx_);
-		deq_.clear();
-		isClose_ = true;
-	}
-	condProducer_.notify_all();
-	condConsumer_.notify_all();
-}
-
-template<class T>
-void BlockDeque<T>::flush() {
-	condConsumer_.notify_one();
+BlockDeque<T>::BlockDeque(size_t MaxCapacity)
+    : capacity_(MaxCapacity + 1), head_(0), tail_(0), isClosed_(false) {
+    if (MaxCapacity == 0) {
+        throw std::invalid_argument("Capacity must be greater than 0");
+    }
+    buffer_.resize(capacity_);
+    mask_ = capacity_ - 1;
 }
 
 template<class T>
 void BlockDeque<T>::clear() {
-	std::lock_guard<std::mutex> locker(mtx_);
-	deq_.clear();
+    head_.store(0);
+    tail_.store(0);
 }
 
 template<class T>
-T BlockDeque<T>::front() {
-	std::lock_guard<std::mutex> locker(mtx_);
-	return deq_.front();
+bool BlockDeque<T>::empty() const {
+    return head_.load() == tail_.load();
 }
 
 template<class T>
-T BlockDeque<T>::back() {
-    std::lock_guard<std::mutex> locker(mtx_);
-    return deq_.back();
+bool BlockDeque<T>::full() const {
+    return increment(tail_.load()) == head_.load();
 }
 
 template<class T>
-size_t BlockDeque<T>::size() {
-    std::lock_guard<std::mutex> locker(mtx_);
-    return deq_.size();
+size_t BlockDeque<T>::size() const {
+    size_t tail = tail_.load();
+    size_t head = head_.load();
+    if (tail >= head) {
+        return tail - head;
+    } else {
+        return capacity_ - (head - tail);
+    }
 }
 
 template<class T>
-size_t BlockDeque<T>::capacity() {
-    std::lock_guard<std::mutex> locker(mtx_);
-    return capacity_;
+size_t BlockDeque<T>::capacity() const {
+    return capacity_ - 1; // Exclude the extra space used to differentiate full from empty
+}
+
+template<class T>
+T BlockDeque<T>::front() const {
+    if (empty()) {
+        throw std::runtime_error("Queue is empty");
+    }
+    return buffer_[head_.load()];
+}
+
+template<class T>
+T BlockDeque<T>::back() const {
+    if (empty()) {
+        throw std::runtime_error("Queue is empty");
+    }
+    return buffer_[(tail_.load() + capacity_ - 1) & mask_];
 }
 
 template<class T>
 void BlockDeque<T>::push_back(const T &item) {
-	std::unique_lock<std::mutex> locker(mtx_);
-	while(deq_.size() >= capacity_) {
-		// 解锁，等待重新获得锁，加锁
-		condProducer_.wait(locker);
-	}
-	deq_.push_back(item);
-	condConsumer_.notify_one();
+    if (isClosed_.load()) {
+        throw std::runtime_error("Queue is closed");
+    }
+    if (full()) {
+        throw std::runtime_error("Queue is full");
+    }
+    buffer_[tail_.load()] = item;
+    tail_.store(increment(tail_.load()));
 }
 
 template<class T>
 void BlockDeque<T>::push_front(const T &item) {
-    std::unique_lock<std::mutex> locker(mtx_);
-    while(deq_.size() >= capacity_) {
-        condProducer_.wait(locker);
+    if (isClosed_.load()) {
+        throw std::runtime_error("Queue is closed");
     }
-    deq_.push_front(item);
-    condConsumer_.notify_one();
-}
-
-template<class T>
-bool BlockDeque<T>::empty() {
-    std::lock_guard<std::mutex> locker(mtx_);
-    return deq_.empty();
-}
-
-template<class T>
-bool BlockDeque<T>::full(){
-    std::lock_guard<std::mutex> locker(mtx_);
-    return deq_.size() >= capacity_;
+    if (full()) {
+        throw std::runtime_error("Queue is full");
+    }
+    size_t newHead = (head_.load() + capacity_ - 1) & mask_;
+    buffer_[newHead] = item;
+    head_.store(newHead);
 }
 
 template<class T>
 bool BlockDeque<T>::pop(T &item) {
-	std::unique_lock<std::mutex> locker(mtx_);
-	while(deq_.empty()) {
-		condConsumer_.wait(locker);
-		if (isClose_) return false;
-	}
-	item = deq_.front();
-	deq_.pop_front();
-	condProducer_.notify_one();
-	return true;
+    if (isClosed_.load() && empty()) {
+        return false;
+    }
+    if (empty()) {
+        return false;
+    }
+    item = buffer_[head_.load()];
+    head_.store(increment(head_.load()));
+    return true;
 }
+
+template<class T>
+void BlockDeque<T>::Close() {
+    isClosed_.store(true);
+}
+
+// template<class T>
+// class BlockDeque {
+// private:
+// 	std::deque<T> deq_;
+// 	size_t capacity_;
+// 	bool isClose_;
+
+// 	std::mutex mtx_;
+// 	std::condition_variable condConsumer_;
+// 	std::condition_variable condProducer_;	
+
+// public:
+// 	explicit BlockDeque(size_t MaxCapacity = 1000); 
+// 	~BlockDeque();
+
+// 	void clear();
+// 	bool empty();
+// 	bool full();
+// 	/**
+//      * @brief 关闭队列
+//      * @return {*}
+//      */    
+// 	void Close();
+// 	size_t size();
+// 	size_t capacity();
+
+// 	T front();
+// 	T back();
+// 	void push_back(const T &item);
+// 	void push_front(const T &item);
+// 	bool pop(T &item);
+// 	// bool pop(T &item, int timeout);
+// 	/**
+//      * @brief 刷新缓冲区
+//      * 		  通知消费者，队列中有数据可消费
+//      * 		  在此项目中，异步写日志时会调用阻塞队列中的pop函数
+//      * 		  如果队列为空pop函数会阻塞等待队列中有数据唤醒，此函数作用为唤醒阻塞线程(写线程)
+//      * @return {*}
+//      */  
+// 	void flush();
+// };
+
+// template<class T>
+// // BlockDeque<T>::BlockDeque(size_t MaxCapacity = 100) : capacity_(MaxCapacity) {
+// BlockDeque<T>::BlockDeque(size_t MaxCapacity) : capacity_(MaxCapacity) {
+// 	assert(MaxCapacity > 0);
+// 	isClose_ = false;
+// }
+
+// template<class T>
+// BlockDeque<T>::~BlockDeque() {
+// 	Close();
+// }
+
+// template<class T>
+// void BlockDeque<T>::Close() {
+// 	{
+// 		std::lock_guard<std::mutex> locker(mtx_);
+// 		deq_.clear();
+// 		isClose_ = true;
+// 	}
+// 	condProducer_.notify_all();
+// 	condConsumer_.notify_all();
+// }
+
+// template<class T>
+// void BlockDeque<T>::flush() {
+// 	condConsumer_.notify_one();
+// }
+
+// template<class T>
+// void BlockDeque<T>::clear() {
+// 	std::lock_guard<std::mutex> locker(mtx_);
+// 	deq_.clear();
+// }
+
+// template<class T>
+// T BlockDeque<T>::front() {
+// 	std::lock_guard<std::mutex> locker(mtx_);
+// 	return deq_.front();
+// }
+
+// template<class T>
+// T BlockDeque<T>::back() {
+//     std::lock_guard<std::mutex> locker(mtx_);
+//     return deq_.back();
+// }
+
+// template<class T>
+// size_t BlockDeque<T>::size() {
+//     std::lock_guard<std::mutex> locker(mtx_);
+//     return deq_.size();
+// }
+
+// template<class T>
+// size_t BlockDeque<T>::capacity() {
+//     std::lock_guard<std::mutex> locker(mtx_);
+//     return capacity_;
+// }
+
+// template<class T>
+// void BlockDeque<T>::push_back(const T &item) {
+// 	std::unique_lock<std::mutex> locker(mtx_);
+// 	while(deq_.size() >= capacity_) {
+// 		// 解锁，等待重新获得锁，加锁
+// 		condProducer_.wait(locker);
+// 	}
+// 	deq_.push_back(item);
+// 	condConsumer_.notify_one();
+// }
+
+// template<class T>
+// void BlockDeque<T>::push_front(const T &item) {
+//     std::unique_lock<std::mutex> locker(mtx_);
+//     while(deq_.size() >= capacity_) {
+//         condProducer_.wait(locker);
+//     }
+//     deq_.push_front(item);
+//     condConsumer_.notify_one();
+// }
+
+// template<class T>
+// bool BlockDeque<T>::empty() {
+//     std::lock_guard<std::mutex> locker(mtx_);
+//     return deq_.empty();
+// }
+
+// template<class T>
+// bool BlockDeque<T>::full(){
+//     std::lock_guard<std::mutex> locker(mtx_);
+//     return deq_.size() >= capacity_;
+// }
+
+// template<class T>
+// bool BlockDeque<T>::pop(T &item) {
+// 	std::unique_lock<std::mutex> locker(mtx_);
+// 	while(deq_.empty()) {
+// 		condConsumer_.wait(locker);
+// 		if (isClose_) return false;
+// 	}
+// 	item = deq_.front();
+// 	deq_.pop_front();
+// 	condProducer_.notify_one();
+// 	return true;
+// }
 
 #endif // BLOCKQUEUE_H
